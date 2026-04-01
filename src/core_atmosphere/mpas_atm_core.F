@@ -982,12 +982,13 @@ module atm_core
       type (mpas_pool_type), pointer :: diag_physics
    
       real (kind=RKIND), dimension(:), pointer :: refl10cm_1km_max, max_hail_diameter_sfc_acc, &
-           max_hail_diameter_column_acc
+           max_hail_diameter_column_acc, prep_complex
 
 #ifdef DO_PHYSICS
       call mpas_pool_get_array(diag_physics, 'refl10cm_1km_max', refl10cm_1km_max)
       call mpas_pool_get_array(diag_physics, 'max_hail_diameter_sfc_acc', max_hail_diameter_sfc_acc)
       call mpas_pool_get_array(diag_physics, 'max_hail_diameter_column_acc', max_hail_diameter_column_acc)
+      call mpas_pool_get_array(diag_physics, 'prep_complex', prep_complex)
       if(associated(refl10cm_1km_max)) then
          refl10cm_1km_max(:) = 0.
       endif
@@ -996,6 +997,9 @@ module atm_core
       endif
       if(associated(max_hail_diameter_column_acc)) then
          max_hail_diameter_column_acc(:) = 0.
+      endif
+      if(associated(prep_complex))then
+         prep_complex(:) = 0.
       endif
 #endif
    

@@ -954,10 +954,16 @@
  real(kind=RKIND),dimension(:),pointer:: graupelnc,rainnc,snownc
  real(kind=RKIND),dimension(:),pointer:: graupelncv,rainncv,snowncv,sr
  real(kind=RKIND),dimension(:),pointer:: frainnc
+ real(kind=RKIND),dimension(:),pointer:: prep_complex
+ real(kind=RKIND),dimension(:,:),allocatable,save:: precip_timesteps
 
 !local variables and arrays:
  integer:: i,j,k
  real(kind=RKIND):: rho_a
+ integer         :: window_n, window_len
+ real(kind=RKIND):: window_n_tmp
+ logical,save    :: init_precip_timesteps = .false.
+ logical,save    :: alloc_precip_timesteps = .false.
 
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -974,6 +980,21 @@
  call mpas_pool_get_array(diag_physics,'snownc'    ,snownc    )
  call mpas_pool_get_array(diag_physics,'snowncv'   ,snowncv   )
  call mpas_pool_get_array(diag_physics,'sr'        ,sr        )
+ call mpas_pool_get_array(diag_physics,'prep_complex',prep_complex)
+
+ window_len   = 60 * 60 ! min2sec
+ window_n_tmp = window_len/dt_microp
+ window_n = nint(window_n_tmp) + 1
+
+ if ( .not. alloc_precip_timesteps )then
+    allocate(precip_timesteps(window_n,its:ite))
+    alloc_precip_timesteps = .true.
+ end if
+
+ if ( .not. init_precip_timesteps )then
+    precip_timesteps = -999._RKIND
+    init_precip_timesteps = .true.
+ end if
 
  do i = its,ite
     precipw(i) = 0._RKIND
@@ -995,6 +1016,13 @@
     !accumulated precipitation:
     rainnc(i) = rainnc(i) + rainncv(i)
 
+    ! Collect precipitation at each time step to precip_timesteps every
+    ! hour
+    precip_timesteps(1,i) = rainnc(i)
+    do k = window_n - 1, 1, -1
+       precip_timesteps(k+1,i) = precip_timesteps(k,i)
+    end do
+
    if(l_acrain .and. config_bucket_rainnc.gt.0._RKIND .and. &
       rainnc(i).gt.config_bucket_rainnc) then
       i_rainnc(i) = i_rainnc(i) + 1
@@ -1003,6 +1031,12 @@
 
  enddo
  enddo
+
+ ! Reach the end of each hour
+ if ( minval(precip_timesteps(window_n, :)) .gt. -1.0e-6 )then
+      init_precip_timesteps = .false.
+      call compress_prep(precip_timesteps,window_n,its,ite,prep_complex)
+ endif
 
 !variables specific to different cloud microphysics schemes:
  microp_select: select case(trim(microp_scheme))
@@ -1057,6 +1091,27 @@
  end select microp_select
 
  end subroutine precip_to_MPAS
+
+!===================
+ subroutine compress_prep(precip_timesteps,winlen,its,ite,prep_out)
+!===================
+ implicit none
+ ! input arguments:      
+ integer,intent(in):: its,ite,winlen
+ real(kind=RKIND),dimension(1:winlen,its:ite),intent(in) :: precip_timesteps
+ real(kind=RKIND),dimension(its:ite),intent(out)     :: prep_out
+
+ ! local variables
+ real(kind=RKIND),dimension(1:winlen,its:ite) :: preprate
+ integer    :: it
+
+ do it = 1, winlen - 1
+    preprate(winlen-it+1,:) = precip_timesteps(it,:)-precip_timesteps(it+1,:)
+ end do
+ preprate(1,:) = 0.0
+
+ prep_out = maxloc(preprate, dim=1) * dt_microp / 60.0
+ end subroutine compress_prep
 
 !=================================================================================================================
  subroutine compute_radar_reflectivity(configs,diag_physics,its,ite)
