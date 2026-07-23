@@ -1032,7 +1032,7 @@
  enddo
  enddo
 
- ! Reach the end of each hour
+ ! Reach the end of each hour #jcjr
  if ( minval(precip_timesteps(window_n, :)) .gt. -1.0e-6 )then
       init_precip_timesteps = .false.
       call compress_prep(precip_timesteps,window_n,its,ite,prep_complex)
@@ -1091,6 +1091,62 @@
  end select microp_select
 
  end subroutine precip_to_MPAS
+!     jcjr mods start
+!=====================
+ subroutine tend_extract_posdef(nk, bins, tendency, winlen, start, nbins, ta_sm, ta_mx, ta_hs, min_max,  phist)
+!=====================
+!tendency is the tendency we are receiving and only if its nonzero
+  real, intent(in) :: tendency
+  integer, intent(in) :: nk
+  real, dimension(nk), intent(in) :: start, bins, nbins
+  real :: val, tmp
+  integer, intent(in) :: ta_sm, ta_mx, ta_hs, min_max , winlen
+  integer, intent(inout) :: phist
+  
+!begin update to phist in reverse using ta_ descriptors
+val = (tendency/dt_microp)*winlen !precipitation per hour
+
+! sum of the hourly precip
+if (ta_sm .eq. 9) then
+    !if current phist value is zero use addition 
+    if (phist .eq. 0) then
+        !nothing to retrieve , have 3 spaces to occupy or 999 mm
+        phist = int(tendency)*start(1)
+    !else phist already has a value
+    else (phist .gt. 0) then
+        !add sum
+        phist = phist + int(tendency)*start(1)
+    endif
+
+
+endif
+!max_value
+if (ta_mx .eq. 6) then
+    if (phist .eq. 0 .and. phist .gt. min_max) then
+        !new max value , have 3 spaces to occupy
+        phist = int(val)*start(2)
+    !else phist already has a value
+    else (phist .gt. min_max) then
+        !replace max, retrieve old val
+        tmp = int((phist/start[3])-(start[0]/start[3]*10))
+        !calc new max
+        if (val .gt. tmp) then:
+            phist = phist + int(mx)*start(2) - tmp*start(2)
+        endif
+    endif
+      endif
+      
+!histogram section          
+if (ta_hs .eq. 3)then
+    do k=3,3+nbins !needs nkk and num_bins
+        if (val .ge. bins(k) and val .lt. bins(k+1)) then
+            phist = phist + start(k)
+        endif
+    enddo
+ endif
+
+end subroutine tend_extract_posdef
+
 
 !===================
  subroutine compress_prep(precip_timesteps,winlen,its,ite,prep_out)
@@ -1100,17 +1156,60 @@
  integer,intent(in):: its,ite,winlen
  real(kind=RKIND),dimension(1:winlen,its:ite),intent(in) :: precip_timesteps
  real(kind=RKIND),dimension(its:ite),intent(out)     :: prep_out
-
- ! local variables
+      
+! local variables
  real(kind=RKIND),dimension(1:winlen,its:ite) :: preprate
+ real(kind=RKIND), dimension(5) :: start
  integer    :: it
+ char :: n_info
+
+!initialize prep_out to zero at the end of each hour
+prep_out = 0
+      
+ bunits = 'mm/hr' !for consistency of the units in the model 
+ bins = [0,.03,25.4,635.]   !human readable in mm/hr; sized with max value as last [0,.01",1",20"]/hr
+ nk = 3                     !number of recorded variables specfieid by ta_
+ mm = 1.0                   !min for the max value to be recorded which is scaled to a prate 
+ min_max = mm 
+ nbins = int(2*len(bins)-1)
+
+ nsp = [nbins,3,3] !limiting max and sum to 3 digits whole mm, if it exceeds 999 we should be able to tell
+ nspace = sum(nsp) !number of placeholders for each hist bin (if dt in an hour is less than 100 then 2, more then 3)
+ n_info = 'hstmaxsum'
+ ta_hs = scan(n_info, 'hst') !if 3 then 1st nsp(1) elseif 0 then not present
+ ta_mx = scan(n_info, 'max') !if 6 then 2nd nsp(2)
+ ta_sm = scan(n_info, 'sum') !if 9 then 3rd nsp(3)
+
+!for the max and sum components presence
+if (ta_sm .eq. 9) then
+   start(1) = 1
+end if
+
+if (ta_mx .eq. 6) then
+   start(2) = 1000
+end if
+
+!manual options for start
+if (ta_hs .eq. 3) then
+   !assumes nsp = 2
+   start(3) = 1000000
+   start(4) = 100000000
+   start(5) = 10000000000
+ end if
 
  do it = 1, winlen - 1
-    preprate(winlen-it+1,:) = precip_timesteps(it,:)-precip_timesteps(it+1,:)
+      !preprate(winlen-it+1,:) = precip_timesteps(it,:)-precip_timesteps(it+1,:)
+!     add call to calculate the new combined variable
+      do iy = its, ite
+         tendency = precip_timesteps(it,iy)-precip_timesteps(it+1,iy)
+         call tend_extract_posdef(nk, bins, tendency, winlen, start, phist, ta_sm, ta_mx, ta_hs, min_max)
  end do
- preprate(1,:) = 0.0
+!     preprate(1,:) = 0.0
+! final output
+ prep_out = phist
+!prep_out = maxloc(preprate, dim=1) * dt_microp / 60.0
 
- prep_out = maxloc(preprate, dim=1) * dt_microp / 60.0
+      
  end subroutine compress_prep
 
 !=================================================================================================================
