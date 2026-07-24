@@ -1096,12 +1096,16 @@
  subroutine tend_extract_posdef(nk, bins, tendency, winlen, start, nbins, ta_sm, ta_mx, ta_hs, min_max,  phist)
 !=====================
 !tendency is the tendency we are receiving and only if its nonzero
-  real, intent(in) :: tendency
+  real(kind=RKIND), intent(in) :: tendency
   integer, intent(in) :: nk
-  real, dimension(nk), intent(in) :: start, bins, nbins
-  real :: val, tmp
-  integer, intent(in) :: ta_sm, ta_mx, ta_hs, min_max , winlen
+  real(kind=RKIND), dimension(nk), intent(in) :: bins
+  integer, dimension(5), intent(in) :: start
+  integer, intent(in) :: nbins
+  real(kind=RKIND) :: val, tmp
+  integer, intent(in) :: ta_sm, ta_mx, ta_hs, winlen
+  real(kind=RKIND), intent(in) :: min_max
   integer, intent(inout) :: phist
+  integer :: k
   
 !begin update to phist in reverse using ta_ descriptors
 val = (tendency/dt_microp)*winlen !precipitation per hour
@@ -1113,7 +1117,7 @@ if (ta_sm .eq. 9) then
         !nothing to retrieve , have 3 spaces to occupy or 999 mm
         phist = int(tendency)*start(1)
     !else phist already has a value
-    else (phist .gt. 0) then
+    else if (phist .gt. 0) then
         !add sum
         phist = phist + int(tendency)*start(1)
     endif
@@ -1126,11 +1130,11 @@ if (ta_mx .eq. 6) then
         !new max value , have 3 spaces to occupy
         phist = int(val)*start(2)
     !else phist already has a value
-    else (phist .gt. min_max) then
+    else if (phist .gt. min_max) then
         !replace max, retrieve old val
-        tmp = int((phist/start[3])-(start[0]/start[3]*10))
+        tmp = int((phist/start(3))-(start(0)/start(3)*10))
         !calc new max
-        if (val .gt. tmp) then:
+        if (val .gt. tmp) then
             phist = phist + int(mx)*start(2) - tmp*start(2)
         endif
     endif
@@ -1139,7 +1143,7 @@ if (ta_mx .eq. 6) then
 !histogram section          
 if (ta_hs .eq. 3)then
     do k=3,3+nbins !needs nkk and num_bins
-        if (val .ge. bins(k) and val .lt. bins(k+1)) then
+        if (val .ge. bins(k) .and. val .lt. bins(k+1)) then
             phist = phist + start(k)
         endif
     enddo
@@ -1159,21 +1163,25 @@ end subroutine tend_extract_posdef
       
 ! local variables
  real(kind=RKIND),dimension(1:winlen,its:ite) :: preprate
- real(kind=RKIND), dimension(5) :: start
- integer    :: it
- char :: n_info
+ integer, dimension(5) :: start
+ integer    :: it, phist
+ character :: n_info, bunits
+ real(kind=RKIND), dimension(4) :: bins
+ real(kind=RKIND), dimension(3) :: nsp
+ integer    :: nk, nbins, nspace,ta_hs,ta_mx,ta_sm, iy
+ real(kind=RKIND):: mm, min_max, tendency
 
 !initialize prep_out to zero at the end of each hour
 prep_out = 0
       
  bunits = 'mm/hr' !for consistency of the units in the model 
- bins = [0,.03,25.4,635.]   !human readable in mm/hr; sized with max value as last [0,.01",1",20"]/hr
+ bins = (/0.,.03,25.4,635./)   !human readable in mm/hr; sized with max value as last [0,.01",1",20"]/hr
  nk = 3                     !number of recorded variables specfieid by ta_
  mm = 1.0                   !min for the max value to be recorded which is scaled to a prate 
  min_max = mm 
- nbins = int(2*len(bins)-1)
+ nbins = int(2*size(bins)-1)
 
- nsp = [nbins,3,3] !limiting max and sum to 3 digits whole mm, if it exceeds 999 we should be able to tell
+ nsp = (/nbins,3,3/) !limiting max and sum to 3 digits whole mm, if it exceeds 999 we should be able to tell
  nspace = sum(nsp) !number of placeholders for each hist bin (if dt in an hour is less than 100 then 2, more then 3)
  n_info = 'hstmaxsum'
  ta_hs = scan(n_info, 'hst') !if 3 then 1st nsp(1) elseif 0 then not present
@@ -1202,7 +1210,9 @@ if (ta_hs .eq. 3) then
 !     add call to calculate the new combined variable
       do iy = its, ite
          tendency = precip_timesteps(it,iy)-precip_timesteps(it+1,iy)
-         call tend_extract_posdef(nk, bins, tendency, winlen, start, phist, ta_sm, ta_mx, ta_hs, min_max)
+         call tend_extract_posdef(nk, bins, tendency, winlen, start, &
+              nbins, ta_sm, ta_mx, ta_hs, min_max, phist)
+      end do
  end do
 !     preprate(1,:) = 0.0
 ! final output
