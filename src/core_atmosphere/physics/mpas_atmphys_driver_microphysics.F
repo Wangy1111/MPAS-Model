@@ -1135,7 +1135,7 @@ if (ta_mx .eq. 6) then
         tmp = int((phist/start(3))-(start(0)/start(3)*10))
         !calc new max
         if (val .gt. tmp) then
-            phist = phist + int(mx)*start(2) - tmp*start(2)
+            phist = phist + int(val)*start(2) - tmp*start(2)
         endif
     endif
       endif
